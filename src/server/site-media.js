@@ -2,7 +2,7 @@
 
 /**
  * What a site shows of a model, saved with its files: after a download from MakerWorld,
- * Printables or Thingiverse, the model's folder becomes a model folder (model-folders.js) and
+ * Printables or Thingiverse (or files added by hand to a MakerWorld or Cults model), the model's folder becomes a model folder (model-folders.js) and
  * gets the model's pictures (its gallery, not the site's own graphics), the guides, parts lists
  * and PDFs the site lists for it, and its videos: video files into video/, YouTube videos as
  * links (they cannot be downloaded). Only the site's own hosts are downloaded from. Files saved
@@ -21,7 +21,8 @@ const MAX_FILE_BYTES = 200 * 1024 * 1024;
 const HOSTS = {
   makerworld: ['bblmw.com', 'bambulab.com', 'aliyuncs.com', 'amazonaws.com', 'cloudfront.net'],
   printables: ['printables.com'],
-  thingiverse: ['thingiverse.com', 'thingiverse-production-new.s3.amazonaws.com', 'thingiverse-production.s3.amazonaws.com']
+  thingiverse: ['thingiverse.com', 'thingiverse-production-new.s3.amazonaws.com', 'thingiverse-production.s3.amazonaws.com'],
+  cults: ['fbi.cults3d.com', 'images.cults3d.com', 'videos.cults3d.com']
 };
 
 function allowedHost(site) {

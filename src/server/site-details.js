@@ -17,7 +17,7 @@ const { Readable, Transform } = require('stream');
 const { pipeline } = require('stream/promises');
 const database = require('../core/database');
 const { SITES, fromThingiversePage, linkKey, parseModelLink } = require('../core/link-import');
-const { printablesDetails, thingiverseDetails } = require('../core/site-model-details');
+const { cultsDetails, printablesDetails, thingiverseDetails } = require('../core/site-model-details');
 const { folderName, makerWorldDetails, modelFileName, splitName } = require('../core/makerworld');
 const { httpsFetch, isBlocked, readLimited, USER_AGENT } = require('./link-import');
 const translate = require('./translate');
@@ -103,6 +103,13 @@ function signInError(message = 'Sign in to MakerWorld first') {
 function makerWorldLink(url) {
   const link = parseModelLink(url);
   if (!link || link.site !== 'makerworld') throw new Error('Not a MakerWorld model link');
+  return link;
+}
+
+/** A model link whose files can be added by hand (Add Downloaded Files…): MakerWorld, or Cults, which gives no downloads. */
+function manualLink(url) {
+  const link = parseModelLink(url);
+  if (!link || (link.site !== 'makerworld' && link.site !== 'cults')) throw new Error('Not a MakerWorld or Cults model link');
   return link;
 }
 
@@ -436,9 +443,10 @@ async function thingiverseSiteDetails(link, fetchImpl) {
   return thingiverseDetails({ id: link.id, url: link.url, fromPage, html: blocked ? '' : html, thing, tags, files, ancestors });
 }
 
-/** A model's details from its site: MakerWorld, Printables or Thingiverse; null when there is no such model. */
+/** A model's details from its site: MakerWorld, Printables, Thingiverse or Cults; null when there is no such model. */
 async function siteModelDetails(link, fetchImpl) {
   if (link.site === 'printables') return printablesSiteDetails(link, fetchImpl);
+  if (link.site === 'cults') return cultsDetails(await require('./cults').creation(link.id, fetchImpl), link.url);
   if (link.site === 'thingiverse') return thingiverseSiteDetails(link, fetchImpl);
   return makerWorldDetails(await fetchDesign(link, fetchImpl), link.url);
 }
@@ -627,7 +635,7 @@ async function finishFolder(target, details, link, mainName, ctx) {
  * model into the files.
  */
 async function prepareManualFolder({ url, folder }) {
-  const link = makerWorldLink(url);
+  const link = manualLink(url);
   const ctx = require('./path-context').networkPathContext();
   const parent = require('./uploads').checkWritableFolder(folder, ctx);
   const { details } = (await getDetails(link.url)) || {};
@@ -645,7 +653,9 @@ async function prepareManualFolder({ url, folder }) {
 function addedByHandFolder(key, ctx) {
   const modelFolders = require('./model-folders');
   const rows = database.db
-    .prepare("SELECT filePath, source FROM models WHERE filePath NOT LIKE 'url::%' AND source LIKE '%makerworld.com%' ORDER BY id DESC")
+    .prepare(
+      "SELECT filePath, source FROM models WHERE filePath NOT LIKE 'url::%' AND (source LIKE '%makerworld.com%' OR source LIKE '%cults3d.com%') ORDER BY id DESC"
+    )
     .all();
   for (const { filePath, source } of rows) {
     if (linkKey(parseModelLink(source)) !== key || !modelFolders.folderOfFile(filePath)) continue;
@@ -660,7 +670,7 @@ function addedByHandFolder(key, ctx) {
 
 /** @param {{ url: string, folder: string, files?: string[] | null }} request */
 async function finishManualFolder({ url, folder, files = null }) {
-  const link = makerWorldLink(url);
+  const link = manualLink(url);
   const ctx = require('./path-context').networkPathContext();
   const target = require('./uploads').checkWritableFolder(folder, ctx);
   const { details } = (await getDetails(link.url)) || {};

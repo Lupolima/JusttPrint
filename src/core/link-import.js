@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Bulk import from links: finding Printables, Thingiverse and MakerWorld model links in pasted
+ * Bulk import from links: finding Printables, Thingiverse, MakerWorld and Cults model links in pasted
  * text, and reading a model's name, designer, license and picture from what each site answers.
  * No network access here; src/server/link-import.js does the fetching.
  */
@@ -30,6 +30,13 @@ const SITES = {
     pattern: /^(?:www\.)?makerworld\.com$/,
     path: /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?models\/(\d+)(?:-([^/?#]+))?/i,
     canonical: (id) => `https://makerworld.com/en/models/${id}`
+  },
+  cults: {
+    label: 'Cults',
+    // cults3d.com/en/3d-model/art/jesse-pinkman-figurine, /pt/modelo-3d/joias/gta-logo-keychain: the
+    // second part says "3D model" in the page's language, the third is the category in it.
+    pattern: /^(?:www\.)?cults3d\.com$/,
+    path: /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?=[^/]*3d)(?=[^/]*mod)[^/]+\/[^/]+\/([a-z0-9]+(?:-[a-z0-9]+)*)\/?$/i
   }
 };
 
@@ -55,6 +62,12 @@ function parseModelLink(raw) {
     if (!info.pattern.test(host)) continue;
     const match = info.path.exec(url.pathname);
     if (!match) return null;
+    // Cults: the model is the name at the end of the link (the same in every language, unlike the
+    // category), and the link is kept as pasted: Cults has no address made of the name alone.
+    if (site === 'cults') {
+      const name = match[1].toLowerCase();
+      return { site, id: name, url: `https://cults3d.com${match[0].replace(/\/$/, '')}`, slug: name };
+    }
     const id = String(Number(match[1]));
     if (id === '0') return null;
     let slug;
@@ -177,7 +190,7 @@ function findModelLinks(text) {
   const seen = new Set();
   let skipped = 0;
   for (const line of String(text || '').split(/\r?\n/)) {
-    const candidates = line.match(/(?:https?:\/\/|www\.)[^\s<>"']+|\b(?:printables|thingiverse|makerworld)\.com\/[^\s<>"']+/gi) || [];
+    const candidates = line.match(/(?:https?:\/\/|www\.)[^\s<>"']+|\b(?:printables|thingiverse|makerworld|cults3d)\.com\/[^\s<>"']+/gi) || [];
     for (const candidate of candidates) {
       const link = parseModelLink(candidate);
       if (!link) {
@@ -246,6 +259,41 @@ function fromPrintables(body) {
     image: print.image && print.image.filePath ? printablesImageUrl(print.image.filePath) : null,
     // Newer Printables pictures have no resized versions: the original, when the resized one fails.
     imageFallback: print.image && print.image.filePath ? `https://media.printables.com/${String(print.image.filePath).replace(/^\/+/, '')}` : null
+  };
+}
+
+/**
+ * A Cults creation's illustrations in the site's order: pictures ({ url: the original, resized: the
+ * 516 px copy Cults shows }) and videos (the original; Cults lists them among the pictures).
+ * Cults' copies name the original at the end: images.cults3d.com/<signature>/516x516/filters:…/https://fbi.cults3d.com/….
+ */
+function cultsMedia(creation) {
+  const items = (Array.isArray(creation && creation.illustrations) ? creation.illustrations : [])
+    .filter((item) => item && typeof item.imageUrl === 'string' && /^https:\/\//i.test(item.imageUrl))
+    .sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+  const pictures = [];
+  const videos = [];
+  for (const { imageUrl } of items) {
+    const original = (/\/(https:\/\/fbi\.cults3d\.com\/[^?#]+)$/.exec(imageUrl) || [])[1] || imageUrl;
+    if (/^https:\/\/videos\.cults3d\.com\//i.test(imageUrl) || /\.(?:mp4|m4v|webm|mov)$/i.test(original)) videos.push({ url: original, name: null });
+    else pictures.push({ url: original, resized: imageUrl });
+  }
+  return { pictures, videos };
+}
+
+/** A Cults creation (src/server/cults.js) → { name, designer, license, image, gallery }, or null when there is none. */
+function fromCults(creation) {
+  if (!creation || !creation.name) return null;
+  const [first, ...others] = cultsMedia(creation).pictures;
+  return {
+    name: clean(creation.name),
+    designer: clean(creation.creator && creation.creator.nick),
+    license: licenseName(creation.license && creation.license.name),
+    image: first ? first.resized : null,
+    // The original, when the resized copy is not a JPEG, PNG or WebP picture.
+    imageFallback: first ? first.url : null,
+    // The other pictures, for the online model's gallery.
+    gallery: others.map((picture) => picture.resized)
   };
 }
 
@@ -338,7 +386,7 @@ function fromThingiversePage(html, id) {
 }
 
 /** Hosts a model picture may come from. */
-const IMAGE_HOSTS = ['media.printables.com', 'makerworld.bblmw.com', 'cdn.thingiverse.com', 'resize.thingiverse.com'];
+const IMAGE_HOSTS = ['media.printables.com', 'makerworld.bblmw.com', 'cdn.thingiverse.com', 'resize.thingiverse.com', 'images.cults3d.com', 'fbi.cults3d.com'];
 
 function isAllowedImageUrl(raw) {
   try {
@@ -373,6 +421,8 @@ module.exports = {
   fromPrintables,
   fromMakerWorld,
   fromThingiversePage,
+  fromCults,
+  cultsMedia,
   licenseName,
   isAllowedImageUrl,
   imageType

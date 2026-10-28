@@ -5,8 +5,8 @@
  * saves it as a link-only model (filePath "url::<link>"), with its picture as the thumbnail.
  *
  * The server only contacts fixed addresses: Printables' GraphQL API, MakerWorld's design API,
- * the Thingiverse model page, and pictures on those sites' image hosts. A link only supplies
- * the model number, so pasted text cannot make the server load anything else.
+ * the Thingiverse model page, Cults' GraphQL API, and pictures on those sites' image hosts. A link
+ * only supplies the model number (Cults: its name), so pasted text cannot make the server load anything else.
  */
 
 const https = require('https');
@@ -16,6 +16,7 @@ const {
   SITES,
   fallbackName,
   findModelLinks,
+  fromCults,
   fromMakerWorld,
   fromPrintables,
   fromThingiversePage,
@@ -25,6 +26,7 @@ const {
   parseModelLink,
   printablesQuery
 } = require('../core/link-import');
+const { THUMBNAIL_ABSOLUTE_MAX_LOAD_CHARS } = require('../core/thumbnails');
 
 const TIMEOUT_MS = 15000;
 const MAX_PAGE_BYTES = 3 * 1024 * 1024;
@@ -149,6 +151,11 @@ async function fetchModelInfo(link, fetchImpl = httpsFetch) {
     if (!info) throw notFound('Printables has no model with this number');
     return info;
   }
+  if (link.site === 'cults') {
+    const info = fromCults(await require('./cults').creation(link.id, fetchImpl));
+    if (!info) throw notFound('Cults has no model with this name');
+    return info;
+  }
   if (link.site === 'makerworld') {
     const body = await fetchJson(fetchImpl, `https://makerworld.com/api/v1/design-service/design/${link.id}`, {
       headers: { accept: 'application/json' }
@@ -187,7 +194,7 @@ function knownModels(db) {
   const rows = db
     .prepare(
       `SELECT filePath, fileName, source FROM models
-    WHERE filePath LIKE 'url::%' OR source LIKE '%printables.com%' OR source LIKE '%thingiverse.com%' OR source LIKE '%makerworld.com%'`
+    WHERE filePath LIKE 'url::%' OR source LIKE '%printables.com%' OR source LIKE '%thingiverse.com%' OR source LIKE '%makerworld.com%' OR source LIKE '%cults3d.com%'`
     )
     .all();
   const known = new Map();
@@ -244,7 +251,8 @@ async function importLink(raw, deps, options = {}) {
   if (!link) throw new Error('Not a Printables, Thingiverse or MakerWorld model link');
   // With a download folder, files are downloaded; none chosen (empty `profileIds`/`fileIds`): no download.
   const chosenNone = (Array.isArray(options.profileIds) && !options.profileIds.length) || (Array.isArray(options.fileIds) && !options.fileIds.length);
-  const downloading = !!options.downloadFolder && !chosenNone && (link.site === 'makerworld' ? !!download : !!downloadFiles);
+  // Cults gives no download links: its models are added online, and their files by hand.
+  const downloading = !!options.downloadFolder && !chosenNone && link.site !== 'cults' && (link.site === 'makerworld' ? !!download : !!downloadFiles);
   const existing = knownModels(db).get(linkKey(link));
   const exists = (/** @type {string | null} */ warning = null) => ({
     status: 'exists',
@@ -257,10 +265,13 @@ async function importLink(raw, deps, options = {}) {
   // An online model already in the library can still get its files.
   if (existing && !(downloading && String(existing.filePath).startsWith('url::'))) return exists();
 
-  /** @type {{ name: string | null, designer: string | null, license: string | null, image: string | null, imageFallback?: string | null } | null} */
+  /** @type {{ name: string | null, designer: string | null, license: string | null, image: string | null, imageFallback?: string | null, gallery?: string[] } | null} */
   let info = null;
   /** @type {string | null} */
-  let warning = null;
+  let warning =
+    options.downloadFolder && link.site === 'cults'
+      ? "Not downloaded: Cults does not let JusttPrint download files. Download them on Cults, then add them with Add Downloaded Files… in the model's details."
+      : null;
 
   // Printables and Thingiverse with a download folder: the chosen files (every model file when not
   // chosen), so the model arrives as its files. If that fails, the online model is added instead.
@@ -343,7 +354,14 @@ async function importLink(raw, deps, options = {}) {
   let pictureError = null;
   for (const url of pictures) {
     try {
-      await saveThumbnail(filePath, await fetchImage(url, fetchImpl));
+      const cover = await fetchImage(url, fetchImpl);
+      // Cults: its other pictures after the cover, as the gallery ("::"), while the app still loads it.
+      const gallery = [cover];
+      for (const other of (info && info.gallery) || []) {
+        const image = await fetchImage(other, fetchImpl).catch(() => null);
+        if (image && gallery.join('::').length + 2 + image.length <= THUMBNAIL_ABSOLUTE_MAX_LOAD_CHARS) gallery.push(image);
+      }
+      await saveThumbnail(filePath, gallery.join('::'));
       picture = true;
       break;
     } catch (error) {

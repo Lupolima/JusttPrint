@@ -1,12 +1,12 @@
 'use strict';
 
 /**
- * Printables and Thingiverse model details for the details panel, in the same shape as
- * MakerWorld's (makerworld.js makerWorldDetails), so one section shows all three sites. No
+ * Printables, Thingiverse and Cults model details for the details panel, in the same shape as
+ * MakerWorld's (makerworld.js makerWorldDetails), so one section shows every site. No
  * network access here; src/server/site-details.js does the fetching.
  */
 
-const { licenseName } = require('./link-import');
+const { cultsMedia, licenseName } = require('./link-import');
 const { htmlToText, youtubeIds } = require('./makerworld');
 
 const clean = (value, max = 500) => {
@@ -273,4 +273,55 @@ function thingiverseDetails({ id, url, fromPage = null, html = '', thing = null,
   return details;
 }
 
-module.exports = { printablesDetails, thingiverseDetails };
+/** Files Cults lists that are models (the rest: archives, projects). */
+const CULTS_MODEL_FILE = /^(?:stl|3mf|obj|step|stp|amf|ply)$/i;
+
+/**
+ * A Cults creation (cults3d.com GraphQL, src/server/cults.js) → the details panel's details, or
+ * null when there is no such model. The files are listed by name only: Cults gives no downloads.
+ * @returns {SiteDetails | null}
+ */
+function cultsDetails(creation, url) {
+  if (!creation || !creation.name) return null;
+  const details = blank('cults', url, creation.slug || '');
+  const creator = creation.creator || {};
+  details.title = clean(creation.name);
+  details.designer = { name: clean(creator.nick, 200), handle: clean(creator.nick, 100), url: clean(creator.url, 500) };
+  details.license = licenseName(creation.license && creation.license.name);
+  details.categories = [creation.category, ...list(creation.subCategories)].map((c) => clean(c && c.name, 100)).filter(present);
+  details.tags = list(creation.tags)
+    .map((t) => clean(t, 80))
+    .filter(present)
+    .map((name) => ({ name, english: null }));
+  details.created = clean(creation.publishedAt, 40);
+  details.updated = clean(creation.updatedAt, 40);
+  // The designer's printing notes ("details": layer height, supports…) after the description.
+  const text = (value) =>
+    String(value || '')
+      .replace(/\r\n?/g, '\n')
+      .trim();
+  details.description = [text(creation.description), text(creation.details)].filter(Boolean).join('\n\n') || null;
+  details.videos = youtubeIds(
+    `${list(creation.videos)
+      .map((v) => v && v.url)
+      .join(' ')} ${creation.description || ''}`
+  );
+  details.files = filesOf(
+    list(creation.blueprints).map((b) => ({
+      id: b.position,
+      name: b.fileName,
+      size: null,
+      kind: b.fileExtension,
+      model: CULTS_MODEL_FILE.test(String(b.fileExtension || ''))
+    }))
+  );
+  const media = cultsMedia(creation);
+  details.pictures = media.pictures.map((p) => p.url);
+  // Videos are saved with the documents (into the folder's video/).
+  details.attachments = media.videos;
+  details.cover = details.pictures[0] || null;
+  details.stats = { likes: number(creation.likesCount), downloads: number(creation.downloadsCount), views: number(creation.viewsCount) };
+  return details;
+}
+
+module.exports = { printablesDetails, thingiverseDetails, cultsDetails };
