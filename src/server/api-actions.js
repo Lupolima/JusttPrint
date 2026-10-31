@@ -107,6 +107,7 @@ const ACTIONS = {
   'makerworld-check-folder': ['string'],
   'makerworld-prepare-folder': ['object'],
   'makerworld-add-files': ['object'],
+  'fila-rodar-agora': [],
 
   // Scanning and library folders
   'load-directory': [],
@@ -589,6 +590,7 @@ const EDITOR_ACTIONS = new Set([
   'makerworld-check-folder',
   'makerworld-prepare-folder',
   'makerworld-add-files',
+  'fila-rodar-agora',
   'browse-folders',
   'scan-directory',
   'remove-missing-models',

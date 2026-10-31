@@ -32,6 +32,16 @@ ipcMain.handle('save-site-edits', async (event, url, changes) => {
   return result;
 });
 
+// Local: the "Run queue now" button. The backup queue runs on the host, outside this container: this
+// only leaves a request file in the data folder, and a systemd path unit on the host starts the queue.
+// A person clicking means the robot check was solved: the 30-minute pause is forgotten here, only here.
+ipcMain.handle('fila-rodar-agora', async () => {
+  siteDetails.resetCaptchaPause();
+  const { app } = require('../runtime');
+  require('fs').writeFileSync(require('path').join(app.getPath('userData'), 'fila-agora'), '');
+  return true;
+});
+
 function safely(work) {
   try {
     return work();
