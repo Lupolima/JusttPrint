@@ -131,6 +131,17 @@ async function addTranslations(details, deps) {
   const stems = details.files.map((file) => splitName(file.name).stem);
   const { english, by, error } = await translate.translateNames(stems, order, deps);
   details.files = details.files.map((file, i) => ({ ...file, english: english[i] ? `${english[i]}${splitName(file.name).extension}` : null }));
+  // Tags with no English from the site, in another script (a Cults designer's Russian tags): the
+  // same translators give it, so the model gets English tags. Tags in Latin script are left as they are.
+  const tags = details.tags || [];
+  const tagEnglish = (
+    await translate.translateNames(
+      tags.map((tag) => (tag.english ? '' : tag.name)),
+      order,
+      deps
+    )
+  ).english;
+  details.tags = tags.map((tag, i) => (tagEnglish[i] ? { ...tag, english: tagEnglish[i] } : tag));
   details.translation = { mode, by, error };
   return details;
 }
