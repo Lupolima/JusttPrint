@@ -91,6 +91,9 @@ function appendAllFieldsSearchSql(params, term, includeNotes) {
   } else {
     params.push(term, term, term, term, term, term, term, term);
   }
+  // MakerWorld's Portuguese title and description (jp_titulos_pt, site-details.js fillPortuguese).
+  params.push(term, term);
+  if (require('./database').db) require('./database').db.exec(require('./makerworld').PORTUGUESE_TABLE_SQL);
   return `(
           LOWER(COALESCE(fileName, '')) LIKE ? OR 
           LOWER(COALESCE(designer, '')) LIKE ? OR 
@@ -99,7 +102,8 @@ function appendAllFieldsSearchSql(params, term, includeNotes) {
           LOWER(COALESCE(source, '')) LIKE ? OR
           LOWER(COALESCE(license, '')) LIKE ? OR
           EXISTS (SELECT 1 FROM model_tags mt INNER JOIN tags t ON t.id = mt.tag_id WHERE mt.model_id = models.id AND LOWER(t.name) LIKE ?) OR
-          EXISTS (SELECT 1 FROM model_categories mc INNER JOIN categories c ON c.id = mc.category_id WHERE mc.model_id = models.id AND LOWER(c.name) LIKE ?)
+          EXISTS (SELECT 1 FROM model_categories mc INNER JOIN categories c ON c.id = mc.category_id WHERE mc.model_id = models.id AND LOWER(c.name) LIKE ?) OR
+          EXISTS (SELECT 1 FROM jp_titulos_pt p WHERE p.model_id = models.id AND (LOWER(COALESCE(p.titulo, '')) LIKE ? OR LOWER(COALESCE(p.descricao, '')) LIKE ?))
         )`;
 }
 

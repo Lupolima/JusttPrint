@@ -167,6 +167,13 @@ async function start() {
   } catch (error) {
     console.error('[MakerWorld] Could not rename downloaded print profiles:', error);
   }
+  // MakerWorld's Portuguese titles for the cards and the search (jp_titulos_pt), from the kept details.
+  try {
+    const filled = require('./site-details').fillPortuguese();
+    if (filled) console.log(`[Portuguese titles] ${filled} model(s)`);
+  } catch (error) {
+    console.error('[Portuguese titles] Could not fill them:', error);
+  }
   // Older downloads (before JusttPrint kept track of them) once, a little later: it may ask MakerWorld for titles.
   setTimeout(() => {
     require('./site-details')

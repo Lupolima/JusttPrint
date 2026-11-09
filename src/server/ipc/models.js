@@ -359,6 +359,7 @@ const getAllModelsHandler = async (event, sortOption, limit = 0) => {
     } else {
       models = database.db.prepare(`SELECT ${selectCols} FROM models ${orderClause} LIMIT ?`).all(limit);
     }
+    require('../site-details').applyPortugueseTitles(models, event && event.language);
     return withTagLists(models);
   } catch (error) {
     console.error('Error in getAllModels IPC:', error);
@@ -493,6 +494,7 @@ const getModelsFilteredHandler = async (event, filters) => {
         if (fit) model.fit = fit;
       }
     }
+    require('../site-details').applyPortugueseTitles(models, event && event.language);
     return withTagLists(models);
   } catch (error) {
     console.error('Error in getModelsFiltered IPC:', error);

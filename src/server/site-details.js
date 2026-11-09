@@ -193,6 +193,11 @@ async function getDetails(url, options = {}) {
       } catch (error) {
         console.warn(`[Site tags] ${error.message}`);
       }
+      try {
+        fillPortuguese(key);
+      } catch (error) {
+        console.warn(`[Portuguese titles] ${error.message}`);
+      }
     }
   }
   return result;
@@ -1035,6 +1040,89 @@ const resetCaptchaPause = () => {
  * @param {{ filePath?: string | null, source?: string | null }} model
  */
 /**
+ * Our table jp_titulos_pt (core/makerworld.js PORTUGUESE_TABLE_SQL): MakerWorld's Portuguese title and
+ * description for each library model whose link or source is a MakerWorld model with Portuguese kept
+ * (patch 19) and whose own title is the site's or empty (the 3MF carries the designer's title). A title
+ * the user changed keeps the model out. With `key`, only that site model's models (after its details
+ * are fetched); without it, the whole library (at start: no network, the kept details only).
+ * @param {string | null} key
+ */
+function fillPortuguese(key = null) {
+  const db = database.db;
+  if (!db) return 0;
+  db.exec(require('../core/makerworld').PORTUGUESE_TABLE_SQL);
+  const { sameText } = require('../core/makerworld');
+  // Every library model by its site model: the online model (url::), the downloaded files (source) and
+  // the downloaded print profiles (site_files).
+  const byKey = new Map();
+  const add = (k, row) => {
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(row);
+  };
+  const models = key
+    ? db
+        .prepare('SELECT id, filePath, source, title FROM models WHERE filePath LIKE ? OR source LIKE ?')
+        .all(`url::%${key.split(':')[1]}%`, `%${key.split(':')[1]}%`)
+    : db.prepare("SELECT id, filePath, source, title FROM models WHERE filePath LIKE 'url::%' OR source LIKE '%makerworld.com%'").all();
+  for (const row of models) {
+    const text = String(row.filePath || '');
+    const link = parseModelLink(text.startsWith('url::') ? text.slice(5) : String(row.source || ''));
+    if (link && link.site === 'makerworld') add(linkKey(link), row);
+  }
+  const files = key
+    ? db.prepare('SELECT f.key, m.id, m.filePath, m.source, m.title FROM site_files f JOIN models m ON m.filePath = f.file_path WHERE f.key = ?').all(key)
+    : db.prepare('SELECT f.key, m.id, m.filePath, m.source, m.title FROM site_files f JOIN models m ON m.filePath = f.file_path').all();
+  for (const row of files) add(row.key, row);
+  const keptRows = key
+    ? db.prepare('SELECT key, data FROM site_details WHERE key = ?').all(key)
+    : db.prepare("SELECT key, data FROM site_details WHERE key LIKE 'makerworld:%' AND instr(data, 'titlePortuguese') > 0").all();
+  const put = db.prepare('INSERT OR REPLACE INTO jp_titulos_pt (model_id, titulo, descricao) VALUES (?, ?, ?)');
+  const drop = db.prepare('DELETE FROM jp_titulos_pt WHERE model_id = ?');
+  let filled = 0;
+  db.transaction(() => {
+    for (const { key: k, data } of keptRows) {
+      let details;
+      try {
+        details = applyEdits(JSON.parse(data), editsFor(k));
+      } catch (_) {
+        continue;
+      }
+      const seen = new Set();
+      for (const row of byKey.get(k) || []) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        const own = String(row.title || '').trim();
+        if (details.titlePortuguese && (!own || sameText(own, details.title) || sameText(own, details.titleEnglish))) {
+          put.run(row.id, details.titlePortuguese, details.descriptionPortuguese || null);
+          filled++;
+        } else drop.run(row.id);
+      }
+    }
+  })();
+  return filled;
+}
+
+/**
+ * The library's lists in the interface language (the browser's cookie): with Portuguese, each model's
+ * `title` (what the cards show) becomes MakerWorld's Portuguese from jp_titulos_pt. Other languages: as is.
+ */
+function applyPortugueseTitles(models, language) {
+  if (!Array.isArray(models) || !models.length || !/^pt/i.test(String(language || '')) || !database.db) return models;
+  database.db.exec(require('../core/makerworld').PORTUGUESE_TABLE_SQL);
+  const titles = new Map(
+    database.db
+      .prepare('SELECT model_id, titulo FROM jp_titulos_pt')
+      .all()
+      .map((r) => [r.model_id, r.titulo])
+  );
+  for (const model of models) {
+    const title = model && titles.get(model.id);
+    if (title) model.title = title;
+  }
+  return models;
+}
+
+/**
  * The model page's title and description in the interface language (the browser's cookie): MakerWorld's
  * Portuguese from the kept details (no network) when it is Portuguese; see core/makerworld.js pagePortuguese.
  * @param {{ filePath?: string | null, source?: string | null, title?: string | null, description?: string | null }} model
@@ -1093,6 +1181,8 @@ module.exports = {
   resetCaptchaPause,
   download,
   fileRenamed,
+  applyPortugueseTitles,
+  fillPortuguese,
   getDetails,
   pageInLanguage,
   saveSiteEdits,

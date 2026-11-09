@@ -16,7 +16,12 @@ const changed = (result) => {
 };
 
 ipcMain.handle('get-collections', async () => collections.listCollections(database.db));
-ipcMain.handle('get-collection', async (event, id) => collections.getCollection(database.db, id));
+ipcMain.handle('get-collection', async (event, id) => {
+  const result = collections.getCollection(database.db, id);
+  // The cards in the interface language (site-details.js applyPortugueseTitles).
+  if (result && Array.isArray(result.models)) require('../site-details').applyPortugueseTitles(result.models, event && event.language);
+  return result;
+});
 ipcMain.handle('get-collection-membership', async (event, filePaths) => collections.membership(database.db, filePaths));
 
 ipcMain.handle('create-collection', async (event, details) =>

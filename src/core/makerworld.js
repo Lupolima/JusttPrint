@@ -223,6 +223,9 @@ function modelFileName(details, extension, profile = null) {
   return `${profileName} - ${safeStem(modelTitle(details), 90, 120)}${extension}`;
 }
 
+/** Our table of MakerWorld's Portuguese per library model: the cards' titles and the search in Portuguese. */
+const PORTUGUESE_TABLE_SQL = 'CREATE TABLE IF NOT EXISTS jp_titulos_pt (model_id INTEGER PRIMARY KEY, titulo TEXT, descricao TEXT)';
+
 /** The same text apart from spacing (a 3MF's description loses the site's line breaks). */
 const sameText = (a, b) => !!a && !!b && String(a).replace(/\s+/g, '') === String(b).replace(/\s+/g, '');
 
@@ -250,4 +253,17 @@ function pagePortuguese(model, details, language, mark) {
   return pageTitle || description ? { pageTitle, description } : null;
 }
 
-module.exports = { folderName, htmlToText, makerWorldDetails, modelFileName, modelTitle, needsTranslation, pagePortuguese, safeStem, splitName, youtubeIds };
+module.exports = {
+  PORTUGUESE_TABLE_SQL,
+  folderName,
+  htmlToText,
+  makerWorldDetails,
+  modelFileName,
+  modelTitle,
+  needsTranslation,
+  pagePortuguese,
+  sameText,
+  safeStem,
+  splitName,
+  youtubeIds
+};
