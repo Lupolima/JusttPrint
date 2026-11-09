@@ -117,6 +117,8 @@ async function callChecked(req, name, args) {
     sender: { send: (channel, ...eventArgs) => events.toCaller({ wsClient }, channel, ...eventArgs) },
     wsClient,
     user,
+    // The interface language the browser chose (cookie `justtprint-language`, set by the language button).
+    language: (/(?:^|;\s*)justtprint-language=([^;\s]+)/.exec(String(req.headers.cookie || '')) || [])[1] || null,
     fromNetwork: true
   };
   try {

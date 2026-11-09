@@ -169,11 +169,23 @@ function downloadsFor(key) {
  * { details, fetchedAt, stale, error, downloads }; `stale` when MakerWorld could not be reached
  * and older details are shown; `downloads` the profiles downloaded so far. Null for other sites.
  */
+/**
+ * With the interface in Portuguese (`language` from the browser's cookie, api.js), the "English" title and
+ * description slots hold MakerWorld's Portuguese when it has one; the English stays kept for the other languages.
+ */
+function inLanguage(details, language) {
+  if (!details || !/^pt/i.test(String(language || ''))) return details;
+  const next = { ...details };
+  if (details.titlePortuguese) next.titleEnglish = details.titlePortuguese;
+  if (details.descriptionPortuguese) next.descriptionEnglish = details.descriptionPortuguese;
+  return next;
+}
+
 async function getDetails(url, options = {}) {
   const result = await fetchDetails(url, options);
   if (result) {
     const key = linkKey(parseModelLink(url));
-    if (result.details) result.details = applyEdits(result.details, editsFor(key));
+    if (result.details) result.details = inLanguage(applyEdits(result.details, editsFor(key)), options.language);
     result.downloads = downloadsFor(key);
     if (result.details) {
       try {
@@ -280,10 +292,10 @@ function applyEdits(details, edits) {
   const fields = Object.keys(edits || {});
   if (!fields.length) return details;
   const next = { ...details, edited: fields };
-  if (typeof edits.title === 'string') Object.assign(next, { title: edits.title, titleEnglish: null });
+  if (typeof edits.title === 'string') Object.assign(next, { title: edits.title, titleEnglish: null, titlePortuguese: null });
   if (typeof edits.designer === 'string') next.designer = { ...details.designer, name: edits.designer };
   if (typeof edits.license === 'string') next.license = edits.license;
-  if (typeof edits.description === 'string') Object.assign(next, { description: edits.description, descriptionEnglish: null });
+  if (typeof edits.description === 'string') Object.assign(next, { description: edits.description, descriptionEnglish: null, descriptionPortuguese: null });
   if (Array.isArray(edits.categories)) next.categories = edits.categories;
   if (Array.isArray(edits.tags)) next.tags = edits.tags.map((name) => ({ name, english: null }));
   if (edits.profiles && typeof edits.profiles === 'object') {
@@ -459,7 +471,10 @@ async function siteModelDetails(link, fetchImpl) {
   if (link.site === 'printables') return printablesSiteDetails(link, fetchImpl);
   if (link.site === 'cults') return cultsDetails(await require('./cults').creation(link.id, fetchImpl), link.url);
   if (link.site === 'thingiverse') return thingiverseSiteDetails(link, fetchImpl);
-  return makerWorldDetails(await fetchDesign(link, fetchImpl), link.url);
+  const body = await fetchDesign(link, fetchImpl);
+  // The same model in Portuguese (MakerWorld's translation); not worth failing the details for.
+  const bodyPortuguese = await fetchDesign(link, fetchImpl, { 'x-bbl-language': 'pt' }).catch(() => null);
+  return makerWorldDetails(body, link.url, bodyPortuguese);
 }
 
 async function fetchDetails(url, { refresh = false, event = null, fetchImpl = httpsFetch, translate: withTranslation = true } = {}) {
@@ -470,7 +485,9 @@ async function fetchDetails(url, { refresh = false, event = null, fetchImpl = ht
   const kept = row ? JSON.parse(row.data) : null;
   const mode = translate.orderKey(translate.currentOrder());
   const fresh = row && Date.now() - Date.parse(row.fetched_at) < MAX_AGE_MS;
-  if (kept && fresh && !refresh && (kept.translation && kept.translation.mode) === mode) {
+  // Details kept before the Portuguese was stored (no `titlePortuguese` at all) are fetched again when shown.
+  const hasPortuguese = link.site !== 'makerworld' || (kept && kept.titlePortuguese !== undefined);
+  if (kept && fresh && !refresh && hasPortuguese && (kept.translation && kept.translation.mode) === mode) {
     return { details: kept, fetchedAt: row.fetched_at, stale: false, error: null };
   }
   try {
@@ -1017,6 +1034,27 @@ const resetCaptchaPause = () => {
  * is one, or one changed in the Edit dialog), from the kept details (no network). Null otherwise.
  * @param {{ filePath?: string | null, source?: string | null }} model
  */
+/**
+ * The model page's title and description in the interface language (the browser's cookie): MakerWorld's
+ * Portuguese from the kept details (no network) when it is Portuguese; see core/makerworld.js pagePortuguese.
+ * @param {{ filePath?: string | null, source?: string | null, title?: string | null, description?: string | null }} model
+ */
+function pageInLanguage(model, language) {
+  if (!/^pt/i.test(String(language || ''))) return null;
+  const text = String((model && model.filePath) || '');
+  const link = parseModelLink(text.startsWith('url::') ? text.slice(5) : String((model && model.source) || ''));
+  if (!link || link.site !== 'makerworld') return null;
+  const key = linkKey(link);
+  const row = table().prepare('SELECT data FROM site_details WHERE key = ?').get(key);
+  if (!row) return null;
+  try {
+    const details = applyEdits(JSON.parse(row.data), editsFor(key));
+    return require('../core/makerworld').pagePortuguese(model, details, language, require('./notes-translation').ORIGINAL_MARK);
+  } catch (_) {
+    return null;
+  }
+}
+
 function siteTitleOf(model) {
   const text = String((model && model.filePath) || '');
   const link = parseModelLink(text.startsWith('url::') ? text.slice(5) : String((model && model.source) || ''));
@@ -1056,6 +1094,7 @@ module.exports = {
   download,
   fileRenamed,
   getDetails,
+  pageInLanguage,
   saveSiteEdits,
   isAllowedDownloadUrl,
   makerWorldLink,

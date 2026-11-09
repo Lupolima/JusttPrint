@@ -7,12 +7,12 @@ const account = require('../makerworld-account');
 const siteDetails = require('../site-details');
 
 /** A model link's MakerWorld details (null for other sites); `refresh` fetches them again. */
-ipcMain.handle('get-site-details', async (event, url, refresh) => siteDetails.getDetails(url, { refresh: !!refresh, event }));
+ipcMain.handle('get-site-details', async (event, url, refresh) => siteDetails.getDetails(url, { refresh: !!refresh, event, language: event && event.language }));
 
 /** Keep changes to a model's site details (the Edit dialog); null forgets them. Answers the details as get-site-details does. */
 ipcMain.handle('save-site-edits', async (event, url, changes) => {
   const before = safely(() => siteDetails.editableValues(url));
-  const result = await siteDetails.saveSiteEdits(url, changes, { event });
+  const result = await siteDetails.saveSiteEdits(url, changes, { event, language: event && event.language });
   // Written down for the History page (model-versions.js detail_changes), by the model's link.
   const after = safely(() => siteDetails.editableValues(url));
   if (before && after) {

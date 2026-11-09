@@ -101,8 +101,21 @@ ipcMain.handle('get-model', async (event, filePath, options) => {
       /* no site details kept */
     }
     if (!pageTitle && folder) pageTitle = require('path').basename(folder);
+    // With the interface in Portuguese (event.language, the browser's cookie): MakerWorld's Portuguese
+    // title and description when the model's own text is the site's (site-details.js pageInLanguage).
+    let description = model.description;
+    try {
+      const translated = require('../site-details').pageInLanguage(model, event && event.language);
+      if (translated) {
+        if (translated.pageTitle) pageTitle = translated.pageTitle;
+        if (translated.description) description = translated.description;
+      }
+    } catch (_) {
+      /* no site details kept */
+    }
     return {
       ...model,
+      description,
       tags: tags || [],
       categories: require('../../core/categories').modelCategoryNames(model.id),
       // Who placed it: 'manual', 'site', 'ai', … (categories.js SOURCES); null when it has no place.

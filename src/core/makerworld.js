@@ -117,7 +117,7 @@ function filesOf(list, folder = '') {
  * MakerWorld's design answer → what the details panel shows, or null when there is no such
  * model (MakerWorld answers id 0). `url` is the model link JusttPrint keeps.
  */
-function makerWorldDetails(body, url) {
+function makerWorldDetails(body, url, bodyPortuguese) {
   if (!body || !body.id || !body.title) return null;
   const creator = body.designCreator || {};
   const handle = clean(creator.handle, 100);
@@ -144,6 +144,9 @@ function makerWorldDetails(body, url) {
     id: String(body.id),
     title: clean(body.title, 500),
     titleEnglish: clean(body.titleTranslated, 500),
+    // MakerWorld's own Portuguese (the same request with the header `x-bbl-language: pt`): null when it has none,
+    // left out when the second request was not made or failed (so the details are fetched again later).
+    ...(bodyPortuguese ? { titlePortuguese: clean(bodyPortuguese.titleTranslated, 500) || null } : {}),
     designer: { name: clean(creator.name, 200), handle, url: handle ? `https://makerworld.com/en/@${encodeURIComponent(handle)}` : null },
     license: licenseName(body.license),
     categories: (Array.isArray(body.categories) ? body.categories : []).map((c) => clean(c && c.name, 100)).filter(Boolean),
@@ -152,6 +155,7 @@ function makerWorldDetails(body, url) {
     updated: clean(body.updateTime, 40),
     description: htmlToText(body.summary) || null,
     descriptionEnglish: htmlToText(body.summaryTranslated) || null,
+    ...(bodyPortuguese ? { descriptionPortuguese: htmlToText(bodyPortuguese.summaryTranslated) || null } : {}),
     videos: youtubeIds(`${body.summary || ''} ${JSON.stringify(extension.design_video || '')}`),
     profiles,
     files: filesOf(extension.model_files),
@@ -219,4 +223,31 @@ function modelFileName(details, extension, profile = null) {
   return `${profileName} - ${safeStem(modelTitle(details), 90, 120)}${extension}`;
 }
 
-module.exports = { folderName, htmlToText, makerWorldDetails, modelFileName, modelTitle, needsTranslation, safeStem, splitName, youtubeIds };
+/** The same text apart from spacing (a 3MF's description loses the site's line breaks). */
+const sameText = (a, b) => !!a && !!b && String(a).replace(/\s+/g, '') === String(b).replace(/\s+/g, '');
+
+/**
+ * The model page in Portuguese: MakerWorld's Portuguese title and description (kept details,
+ * `titlePortuguese`/`descriptionPortuguese`) for a model whose own title/description is the site's
+ * text (the 3MF carries the designer's) or empty. Text the user typed (different from the site's) is
+ * kept. `mark` separates the Portuguese from the original in the description (notes-translation.js).
+ * Null when the language is not Portuguese or there is nothing to show.
+ * @returns {{ pageTitle: string | null, description: string | null } | null}
+ */
+function pagePortuguese(model, details, language, mark) {
+  if (!details || !/^pt/i.test(String(language || ''))) return null;
+  const ownTitle = String((model && model.title) || '').trim();
+  const ownDescription = String((model && model.description) || '');
+  const ownPart = ownDescription.split(mark)[0];
+  const pageTitle =
+    details.titlePortuguese && (!ownTitle || sameText(ownTitle, details.title) || sameText(ownTitle, details.titleEnglish)) ? details.titlePortuguese : null;
+  const description =
+    details.descriptionPortuguese &&
+    !sameText(ownPart, details.descriptionPortuguese) &&
+    (!ownPart.trim() || sameText(ownPart, details.description) || sameText(ownPart, details.descriptionEnglish))
+      ? `${details.descriptionPortuguese}${mark}${ownPart.trim() || details.description || ''}`
+      : null;
+  return pageTitle || description ? { pageTitle, description } : null;
+}
+
+module.exports = { folderName, htmlToText, makerWorldDetails, modelFileName, modelTitle, needsTranslation, pagePortuguese, safeStem, splitName, youtubeIds };
