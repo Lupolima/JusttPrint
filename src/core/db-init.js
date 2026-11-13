@@ -159,6 +159,7 @@ function initializeDatabase() {
 
     // Clean up any database objects that reference models_old (from old migrations)
     cleanupModelsOldReferences();
+    migrateCacheGeneration();
 
     // Repair model_tags table to fix any foreign key issues
     repairModelTagsTable();
@@ -422,6 +423,34 @@ function groupsToMerges() {
     if (result.groups) console.log(`Groups are now merged models: ${result.groups} group(s), ${result.merged} model(s) merged`);
   } catch (error) {
     console.error('Turning groups into merged models failed:', error);
+  }
+}
+
+/**
+ * Cache generation (mudança local): the setting jpCacheGeracao goes up
+ * whenever a model's pictures, tags or path change. The browser keeps the grid's answers (tags,
+ * pictures) on disk between page loads and uses them only while this number is the same, so an
+ * edit made with the page closed (another device, a download) is never shown out of date.
+ */
+const CACHE_GENERATION_SQL = "INSERT INTO settings (key, value) VALUES ('jpCacheGeracao', '1') ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1;";
+const CACHE_GENERATION_TRIGGERS = {
+  jp_cache_models_insert: 'AFTER INSERT ON models',
+  jp_cache_models_delete: 'AFTER DELETE ON models',
+  jp_cache_models_update: 'AFTER UPDATE OF thumbnail, filePath, partOf ON models WHEN OLD.thumbnail IS NOT NEW.thumbnail OR OLD.filePath IS NOT NEW.filePath OR OLD.partOf IS NOT NEW.partOf',
+  jp_cache_model_tags_insert: 'AFTER INSERT ON model_tags',
+  jp_cache_model_tags_delete: 'AFTER DELETE ON model_tags',
+  jp_cache_model_tags_update: 'AFTER UPDATE ON model_tags',
+  jp_cache_tags_rename: 'AFTER UPDATE OF name ON tags WHEN OLD.name IS NOT NEW.name',
+  jp_cache_tags_delete: 'AFTER DELETE ON tags'
+};
+function migrateCacheGeneration(db = database.db) {
+  try {
+    db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('jpCacheGeracao', '1')").run();
+    for (const [name, when] of Object.entries(CACHE_GENERATION_TRIGGERS)) {
+      db.exec(`CREATE TRIGGER IF NOT EXISTS ${name} ${when} BEGIN ${CACHE_GENERATION_SQL} END;`);
+    }
+  } catch (error) {
+    console.error('Cache generation triggers failed:', error);
   }
 }
 
@@ -769,4 +798,4 @@ function verifyDatabaseIntegrity() {
   }
 }
 
-module.exports = { initializeDatabase, verifyDatabaseIntegrity, removeFilamentData };
+module.exports = { initializeDatabase, verifyDatabaseIntegrity, removeFilamentData, migrateCacheGeneration };
