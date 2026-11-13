@@ -103,7 +103,87 @@ function appendAllFieldsSearchSql(params, term, includeNotes) {
         )`;
 }
 
+// Palavras de busca nossas (mudança local; ver localSearchSql abaixo).
+// colecao:<nome>: os modelos de uma coleção comum, e
+// colecao:nenhuma os que não estão em nenhuma. A página não conhece o campo e o manda como
+// palavra solta, por isso entra aqui. O nome vai sem espaços (a busca corta neles): espaço,
+// "-" e "_" não contam, nem maiúsculas sem acento ("back-scratcher" = "Back Scratcher").
+// Coleções inteligentes não contam: elas são uma busca, não uma lista de modelos.
+const COLLECTION_TERM = /^(?:colecao|coleção|collection):(.+)$/i;
+const NO_COLLECTION = new Set(['nenhuma', 'nenhum', 'none']);
+const plainName = (text) =>
+  String(text)
+    .replace(/[\s_-]+/g, '')
+    .replace(/[A-Z]/g, (c) => c.toLowerCase());
+
+function collectionSearchSql(rawValue, params) {
+  const found = COLLECTION_TERM.exec(String(rawValue).trim());
+  if (!found) return null;
+  const db = require('./database').db;
+  if (db) require('./collections').ensureCollectionsSchema(db);
+  const wanted = plainName(found[1]);
+  // Uma parte (partOf) está nas coleções do modelo dela: sem isso as partes apareciam aqui e a
+  // Biblioteca, que esconde as partes, dava 0 para a mesma busca.
+  if (NO_COLLECTION.has(wanted))
+    return 'NOT EXISTS (SELECT 1 FROM collection_models cm WHERE cm.model_id = models.id OR cm.model_id = models.partOf)';
+  // Só número: também o número da coleção (o botão da página da coleção usa isso para nomes
+  // com parênteses ou aspas, que a busca da página cortaria).
+  const byId = /^\d+$/.test(wanted) ? ' OR c.id = ?' : '';
+  params.push(wanted);
+  if (byId) params.push(Number(wanted));
+  return `EXISTS (SELECT 1 FROM collection_models cm INNER JOIN collections c ON c.id = cm.collection_id WHERE cm.model_id = models.id AND (LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.name, ' ', ''), '-', ''), '_', ''), char(9), ''), char(10), ''), char(13), '')) = ?${byId}))`;
+}
+
+// adicionado:7d (dias), 12h (horas), 2sem (semanas), só número = dias, e adicionado:hoje (desde
+// a meia-noite de Brasília: -03:00 fixo, o Brasil não tem horário de verão desde 2019): os modelos
+// que entraram na biblioteca nesse tempo, pela data em que entraram (dateAdded, ISO em UTC).
+const ADDED_TERM = /^(?:adicionado|adicionados|added):(.+)$/i;
+const HOURS_PER = { h: 1, d: 24, dia: 24, dias: 24, w: 168, sem: 168, semana: 168, semanas: 168 };
+function addedSince(value, now = Date.now()) {
+  const v = String(value).trim().toLowerCase();
+  if (v === 'hoje' || v === 'today') {
+    const day = new Date(now - 3 * 3600e3).toISOString().slice(0, 10);
+    return new Date(`${day}T00:00:00-03:00`).toISOString();
+  }
+  const found = /^(\d+)([a-z]*)$/.exec(v);
+  if (!found || (found[2] && !HOURS_PER[found[2]])) return null;
+  return new Date(now - Number(found[1]) * HOURS_PER[found[2] || 'd'] * 3600e3).toISOString();
+}
+
+// online:sim: os modelos que são só um link (nenhum arquivo baixado); online:nao, os com arquivo.
+const ONLINE_TERM = /^online:(.+)$/i;
+const YES = new Set(['sim', 's', 'yes', 'y']);
+const NO = new Set(['nao', 'não', 'n', 'no']);
+
+const OUR_TERM = /^(?:colecao|coleção|collection|adicionado|adicionados|added|online):/i;
+
+/** As palavras de busca nossas (colecao:, adicionado:, online:), ou null para a busca normal. */
+function localSearchSql(rawValue, params, filters) {
+  const text = String(rawValue).trim();
+  // Sem "-", AND nem aspas, a página manda a caixa inteira como UMA palavra ("colecao:x
+  // adicionado:7d"): com uma das nossas no meio, separa nos espaços e exige todas.
+  const words = text.split(/\s+/);
+  if (words.length > 1 && words.some((w) => OUR_TERM.test(w))) {
+    return '(' + words.map((w) => pushSearchClauseFragment('all', w, params, filters)).join(' AND ') + ')';
+  }
+  const collection = collectionSearchSql(text, params);
+  if (collection) return collection;
+  const added = ADDED_TERM.exec(text);
+  const since = added && addedSince(added[1]);
+  if (since) {
+    params.push(since);
+    return 'dateAdded >= ?';
+  }
+  const online = ONLINE_TERM.exec(text);
+  const answer = online && online[1].toLowerCase();
+  if (YES.has(answer)) return "filePath LIKE 'url::%'";
+  if (NO.has(answer)) return "filePath NOT LIKE 'url::%'";
+  return null;
+}
+
 function pushSearchClauseFragment(field, rawValue, params, filters) {
+  const local = field === 'all' || !field ? localSearchSql(rawValue, params, filters) : null;
+  if (local) return local;
   const term = `%${String(rawValue).toLowerCase()}%`;
   switch (field) {
     case 'fileName':
@@ -128,6 +208,8 @@ function pushSearchClauseFragment(field, rawValue, params, filters) {
       params.push(term);
       return "LOWER(COALESCE(license, '')) LIKE ?";
     case 'tag':
+      // tag:nenhuma (mudança local): os modelos sem nenhuma tag.
+      if (String(rawValue).trim().toLowerCase() === 'nenhuma') return 'NOT EXISTS (SELECT 1 FROM model_tags mt WHERE mt.model_id = models.id)';
       params.push(term);
       return 'EXISTS (SELECT 1 FROM model_tags mt INNER JOIN tags t ON t.id = mt.tag_id WHERE mt.model_id = models.id AND LOWER(t.name) LIKE ?)';
     case 'category': {
