@@ -37,7 +37,9 @@ const UNCATEGORIZED = ['Uncategorized', 'Other'];
  * (that one is named after its Title), and its steps. Every step is on unless switched off ('0').
  */
 const LAYERS_SETTING = 'organizeLayers';
-const STEP_SETTINGS = { tidy: 'organizeTidy', tags: 'organizeTags', autoApply: 'organizeAutoApply' };
+// rename (mudança local): '0' em organizeRename mantém os nomes dos arquivos (os do
+// MakerWorld dizem a variação: "V-Spooler 1.2 Large Bed Edition"); a pasta continua com o Title.
+const STEP_SETTINGS = { tidy: 'organizeTidy', tags: 'organizeTags', autoApply: 'organizeAutoApply', rename: 'organizeRename' };
 /** The folder levels Organize can use, and the folder for a model without that value. */
 const LAYERS = {
   category: { label: 'Category', empty: UNCATEGORIZED[0] },
@@ -124,7 +126,7 @@ function cleanLayers(list) {
   return out;
 }
 
-/** Organize's settings: { layers, tidy, tags, autoApply }. */
+/** Organize's settings: { layers, tidy, tags, autoApply, rename }. */
 function organizeOptions() {
   let layers = DEFAULT_LAYERS;
   const saved = setting(LAYERS_SETTING);
@@ -136,7 +138,7 @@ function organizeOptions() {
     }
   }
   const step = (key) => setting(STEP_SETTINGS[key]) !== '0';
-  return { layers, tidy: step('tidy'), tags: step('tags'), autoApply: step('autoApply') };
+  return { layers, tidy: step('tidy'), tags: step('tags'), autoApply: step('autoApply'), rename: step('rename') };
 }
 
 /** The settings page's and the library's view: { uploadFolder, destination, chosenDestination, waiting, options, layerChoices }. */
@@ -618,8 +620,8 @@ function start({ by = null, event = null, puterSignedIn = false } = {}) {
             fs.mkdirSync(parent, { recursive: true });
             return moveFolder(folder, freeFolder(parent, safeName(title || path.basename(folder), 'Model')));
           });
-          // Its files take the Title as their name.
-          if (title) current.renamed += await renameToTitle(modelsUnder(to), safeName(title, 'Model'), by);
+          // Its files take the Title as their name (unless organizeRename is '0').
+          if (title && options.rename) current.renamed += await renameToTitle(modelsUnder(to), safeName(title, 'Model'), by);
           current.movedCount++;
           current.movedModels += models.length;
           if (current.moved.length < MAX_LISTED) current.moved.push({ name, to, category, subcategory, models: models.length });
